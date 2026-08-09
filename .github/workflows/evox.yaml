@@ -1,0 +1,446 @@
+name: Build Evolution-X - Xiaomi Warm
+
+on:
+  workflow_dispatch:
+
+env:
+  DEVICE: warm
+  ROM_MANIFEST: https://github.com/Evolution-X/manifest
+  ROM_BRANCH: bka
+
+jobs:
+  build:
+    name: Evolution-X warm
+    runs-on: ubuntu-22.04
+
+    timeout-minutes: 720
+
+    steps:
+      # ============================================================
+      # FREE SPACE
+      # ============================================================
+      - name: Clean GitHub runner
+        run: |
+          set -eux
+
+          echo "===== DISK BEFORE ====="
+          df -h
+
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo rm -rf /usr/local/share/powershell
+          sudo rm -rf /usr/local/share/chromium
+          sudo rm -rf /usr/local/lib/node_modules
+
+          sudo apt-get clean
+          sudo rm -rf /var/lib/apt/lists/*
+
+          echo "===== DISK AFTER ====="
+          df -h
+
+      # ============================================================
+      # DEPENDENCIES
+      # ============================================================
+      - name: Install build dependencies
+        run: |
+          set -eux
+
+          sudo apt-get update
+
+          sudo apt-get install -y --no-install-recommends \
+            adb \
+            bc \
+            bison \
+            build-essential \
+            ccache \
+            clang \
+            curl \
+            flex \
+            g++-multilib \
+            gcc-multilib \
+            git \
+            git-lfs \
+            gnupg \
+            gperf \
+            imagemagick \
+            lib32ncurses5-dev \
+            lib32readline-dev \
+            lib32z1-dev \
+            libdw-dev \
+            libelf-dev \
+            liblz4-tool \
+            libncurses5 \
+            libncurses5-dev \
+            libssl-dev \
+            libxml2 \
+            libxml2-utils \
+            lld \
+            lzop \
+            openjdk-11-jdk \
+            pngcrush \
+            python3 \
+            python3-protobuf \
+            rsync \
+            schedtool \
+            squashfs-tools \
+            unzip \
+            xsltproc \
+            zip \
+            zlib1g-dev
+
+          sudo apt-get clean
+          sudo rm -rf /var/lib/apt/lists/*
+
+      # ============================================================
+      # REPO TOOL
+      # ============================================================
+      - name: Install repo
+        run: |
+          set -eux
+
+          mkdir -p "$HOME/bin"
+
+          curl -fsSL \
+            https://storage.googleapis.com/git-repo-downloads/repo \
+            -o "$HOME/bin/repo"
+
+          chmod +x "$HOME/bin/repo"
+
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+
+          "$HOME/bin/repo" --version
+
+      # ============================================================
+      # GIT CONFIG
+      # ============================================================
+      - name: Configure git
+        run: |
+          set -eux
+
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+
+          git config --global protocol.version 2
+          git config --global core.compression 0
+
+          git lfs install --skip-repo
+
+      # ============================================================
+      # CREATE SOURCE DIRECTORY
+      # ============================================================
+      - name: Prepare source tree
+        run: |
+          set -eux
+
+          mkdir -p "$GITHUB_WORKSPACE/evolution"
+
+      # ============================================================
+      # INIT EVOLUTION-X
+      # ============================================================
+      - name: Initialize Evolution-X manifest
+        working-directory: evolution
+        run: |
+          set -eux
+
+          repo init \
+            -u "$ROM_MANIFEST" \
+            -b "$ROM_BRANCH" \
+            --git-lfs \
+            --depth=1
+
+      # ============================================================
+      # SYNC
+      #
+      # Equivalent purpose to:
+      # /opt/crave/resync.sh
+      #
+      # But using normal repo sync.
+      # ============================================================
+      - name: Sync Evolution-X source
+        working-directory: evolution
+        run: |
+          set -eux
+
+          repo sync \
+            -c \
+            --force-sync \
+            --no-clone-bundle \
+            --no-tags \
+            --optimized-fetch \
+            --prune \
+            -j"$(nproc)"
+
+      # ============================================================
+      # REMOVE EXISTING DEVICE TREES
+      # ============================================================
+      - name: Remove conflicting device trees
+        working-directory: evolution
+        run: |
+          set -eux
+
+          rm -rf device/xiaomi/warm
+          rm -rf vendor/xiaomi/warm
+          rm -rf device/xiaomi/warm-kernel
+          rm -rf hardware/xiaomi
+          rm -rf hardware/qcom-caf/common
+
+      # ============================================================
+      # DEVICE TREE
+      # ============================================================
+      - name: Clone Xiaomi warm device tree
+        working-directory: evolution
+        run: |
+          set -eux
+
+          git clone \
+            --depth=1 \
+            -b evo \
+            https://github.com/Shyam-vadgama/device_xiaomi_warm \
+            device/xiaomi/warm
+
+      # ============================================================
+      # KERNEL
+      # ============================================================
+      - name: Clone warm kernel
+        working-directory: evolution
+        run: |
+          set -eux
+
+          git clone \
+            --depth=1 \
+            -b main \
+            https://github.com/Shyam-vadgama/warm-kernel \
+            device/xiaomi/warm-kernel
+
+      # ============================================================
+      # XIAOMI HARDWARE
+      # ============================================================
+      - name: Clone Xiaomi hardware
+        working-directory: evolution
+        run: |
+          set -eux
+
+          git clone \
+            --depth=1 \
+            -b lineage-23.2 \
+            https://github.com/LineageOS/android_hardware_xiaomi \
+            hardware/xiaomi
+
+      # ============================================================
+      # VENDOR
+      # ============================================================
+      - name: Clone warm vendor
+        working-directory: evolution
+        run: |
+          set -eux
+
+          git clone \
+            -b lineage-23.2 \
+            https://github.com/Shyam-vadgama/vendor_xiaomi_warm \
+            vendor/xiaomi/warm
+
+          cd vendor/xiaomi/warm
+
+          git checkout c0417ffc868d6f96f8e2ee6252eabbcebfa91927
+
+      # ============================================================
+      # QUALCOMM CAF COMMON
+      # ============================================================
+      - name: Clone Qualcomm CAF common
+        working-directory: evolution
+        run: |
+          set -eux
+
+          git clone \
+            --depth=1 \
+            -b lineage-23.2 \
+            https://github.com/Shyam-vadgama/android_hardware_qcom-caf_common \
+            hardware/qcom-caf/common
+
+      # ============================================================
+      # SHOW TREE
+      # ============================================================
+      - name: Verify device tree
+        working-directory: evolution
+        run: |
+          set -eux
+
+          echo "===== DEVICE ====="
+          ls -la device/xiaomi/warm
+
+          echo "===== KERNEL ====="
+          ls -la device/xiaomi/warm-kernel
+
+          echo "===== VENDOR ====="
+          ls -la vendor/xiaomi/warm
+
+          echo "===== HARDWARE ====="
+          ls -la hardware/xiaomi
+
+          echo "===== CAF ====="
+          ls -la hardware/qcom-caf/common
+
+      # ============================================================
+      # CCACHE
+      # ============================================================
+      - name: Configure ccache
+        working-directory: evolution
+        run: |
+          set -eux
+
+          export USE_CCACHE=1
+          export CCACHE_DIR="$PWD/.ccache"
+
+          mkdir -p "$CCACHE_DIR"
+
+          ccache -M 10G
+          ccache -o compression=true
+
+          ccache -s
+
+      # ============================================================
+      # ENVIRONMENT
+      # ============================================================
+      - name: Setup build environment
+        working-directory: evolution
+        run: |
+          set -eux
+
+          source build/envsetup.sh
+
+          echo "Environment loaded successfully."
+
+      # ============================================================
+      # LUNCH
+      #
+      # Exact fallback from your original script.
+      # ============================================================
+      - name: Select build target
+        working-directory: evolution
+        run: |
+          set -eux
+
+          source build/envsetup.sh
+
+          if lunch lineage_warm-ap4a-userdebug; then
+            echo "Using AP4A target"
+            echo "TARGET=lineage_warm-ap4a-userdebug" >> "$GITHUB_ENV"
+          elif lunch lineage_warm-bp4a-userdebug; then
+            echo "Using BP4A target"
+            echo "TARGET=lineage_warm-bp4a-userdebug" >> "$GITHUB_ENV"
+          else
+            echo "ERROR: No supported warm lunch target found."
+            exit 1
+          fi
+
+      # ============================================================
+      # BUILD
+      # ============================================================
+      - name: Build Evolution-X
+        working-directory: evolution
+        run: |
+          set -eux
+
+          source build/envsetup.sh
+
+          lunch "$TARGET"
+
+          echo "========================================"
+          echo " Building Evolution-X"
+          echo " Device : $DEVICE"
+          echo " Branch : $ROM_BRANCH"
+          echo " Target : $TARGET"
+          echo "========================================"
+
+          m evolution
+
+      # ============================================================
+      # FIND OUTPUT
+      # ============================================================
+      - name: Find build artifacts
+        if: success()
+        working-directory: evolution
+        run: |
+          set -eux
+
+          echo "===== BUILD OUTPUT ====="
+
+          find out/target/product/warm \
+            -maxdepth 1 \
+            -type f \
+            -printf '%f\n' \
+            2>/dev/null || true
+
+          echo
+          echo "===== ZIP FILES ====="
+
+          find out/target/product/warm \
+            -maxdepth 1 \
+            -type f \
+            \( \
+              -name "*.zip" \
+              -o -name "*.img" \
+            \) \
+            -print
+
+      # ============================================================
+      # UPLOAD ROM
+      # ============================================================
+      - name: Upload ROM
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: EvolutionX-warm
+          compression-level: 0
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            evolution/out/target/product/warm/*.zip
+            evolution/out/target/product/warm/*.img
+
+      # ============================================================
+      # FAILURE DEBUG
+      # ============================================================
+      - name: Failure diagnostics
+        if: failure()
+        working-directory: evolution
+        run: |
+          echo "========================================"
+          echo " DISK"
+          echo "========================================"
+          df -h
+
+          echo "========================================"
+          echo " MEMORY"
+          echo "========================================"
+          free -h || true
+
+          echo "========================================"
+          echo " CCACHE"
+          echo "========================================"
+          ccache -s || true
+
+          echo "========================================"
+          echo " REPO STATUS"
+          echo "========================================"
+          repo status || true
+
+          echo "========================================"
+          echo " DEVICE TREE"
+          echo "========================================"
+          ls -la device/xiaomi/warm || true
+
+          echo "========================================"
+          echo " BUILD LOGS"
+          echo "========================================"
+
+          find out \
+            -type f \
+            \( \
+              -name "*.log" \
+              -o -name "build_error.log" \
+            \) \
+            -print \
+            2>/dev/null | head -100 || true
