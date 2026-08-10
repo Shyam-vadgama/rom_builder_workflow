@@ -171,7 +171,8 @@ jobs:
               --no-tags \
               --optimized-fetch \
               --prune \
-              -j"$(nproc)"; then
+              --verbose \
+              -j1; then
               break
             fi
 
