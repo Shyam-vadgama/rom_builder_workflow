@@ -161,16 +161,28 @@ jobs:
       - name: Sync Evolution-X source
         working-directory: evolution
         run: |
-          set -eux
+          set -euxo pipefail
 
-          repo sync \
-            -c \
-            --force-sync \
-            --no-clone-bundle \
-            --no-tags \
-            --optimized-fetch \
-            --prune \
-            -j"$(nproc)"
+          for attempt in 1 2 3; do
+            if repo sync \
+              -c \
+              --force-sync \
+              --no-clone-bundle \
+              --no-tags \
+              --optimized-fetch \
+              --prune \
+              -j"$(nproc)"; then
+              break
+            fi
+
+            if [ "$attempt" -eq 3 ]; then
+              echo "repo sync failed after ${attempt} attempts."
+              exit 1
+            fi
+
+            echo "repo sync attempt ${attempt} failed, retrying in 30s..."
+            sleep 30
+          done
 
       # ============================================================
       # REMOVE EXISTING DEVICE TREES
